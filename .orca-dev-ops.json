@@ -1,0 +1,6 @@
+{
+  "$schema":  "https://raw.githubusercontent.com/5umm3r/orca-dev-ops/main/schemas/orca-dev-ops.schema.json",
+  "workflow": { "mode": "worktree" },
+  "launch":   { "mode": "ask" },
+  "limits":   { "maxWorktrees": 3, "smallChangeFiles": 2, "smallChangeLines": 20 }
+}

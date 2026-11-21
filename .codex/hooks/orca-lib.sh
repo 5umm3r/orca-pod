@@ -1,0 +1,257 @@
+#!/bin/sh
+# Shared applicability and role detection for the Orca master/child workflow hooks.
+#
+# These hooks prevent misoperation by string and path matching; they are not a sandbox.
+# They apply to Claude sessions only, except orca-launch-gate.sh, which orca-init.sh also
+# installs for Codex (with a copy of this file next to it); otherwise Codex is limited by its
+# own sandbox flags and the AGENTS.md rules.
+#
+# Applicability: a path is in scope when its git checkout has the orca-worktree-rules marker
+# in .claude/CLAUDE.md or AGENTS.md at the top level. Out of scope, the role is `none` and the
+# hooks do nothing, whatever Orca says.
+# Role in scope: Orca (`orca worktree current --json`) and git (git dir vs common dir) each
+# say main checkout (`master`) or linked worktree (`child`). One answer is enough; if they
+# disagree, or neither answers, the role is `unknown` and writes are blocked.
+ORCA_MARKER='orca-worktree-rules:start'
+
+orca_under() { case "$1/" in "$2"/*) return 0 ;; esac; return 1; }
+
+# orca_cli <args>: the orca CLI, bounded to ${ORCA_CLI_TIMEOUT:-5} seconds by timeout(1),
+# gtimeout, or perl's alarm (stock macOS has only perl); unbounded only when none exists.
+# The variable exists so tests can use a short bound.
+orca_cli() {
+  command -v orca >/dev/null 2>&1 || return 127
+  _t=${ORCA_CLI_TIMEOUT:-5}
+  if command -v timeout >/dev/null 2>&1; then timeout "$_t" orca "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then gtimeout "$_t" orca "$@"
+  elif command -v perl >/dev/null 2>&1; then perl -e 'alarm shift; exec @ARGV' "$_t" orca "$@"
+  else orca "$@"
+  fi
+}
+
+# orca_phys <absolute path>: the path with symlinks resolved in its nearest existing directory
+# (the path itself may not exist yet).
+orca_phys() {
+  _d=$1 _rest=
+  while [ ! -d "$_d" ]; do
+    case "$_d" in /*/*) ;; *) _rest=$_d$_rest; _d=/; break ;; esac
+    _rest=/${_d##*/}$_rest
+    _d=${_d%/*}
+  done
+  _d=$(CDPATH= cd -P -- "$_d" 2>/dev/null && pwd -P) || _d=
+  _d=${_d%/}$_rest
+  printf '%s\n' "${_d:-/}"
+}
+
+# orca_abspath <path> [<base dir>]: absolute, normalized, physical form of <path>.
+# ~, $HOME and ${HOME} are expanded; relative paths are resolved against <base dir>.
+orca_abspath() {
+  _p=$1
+  case "$_p" in
+  '~' | '~/'*) _p=$HOME${_p#?} ;;
+  '$HOME' | '$HOME/'*) _p=$HOME${_p#?????} ;;
+  '${HOME}' | '${HOME}/'*) _p=$HOME${_p#???????} ;;
+  esac
+  case "$_p" in /*) ;; *) _p=$(orca_phys "${2:-$PWD}")/$_p ;; esac
+  _p=$(printf '%s\n' "$_p" | awk -F / '{ n = 0
+    for (i = 1; i <= NF; i++) { if ($i == "" || $i == ".") continue; if ($i == "..") { if (n) n--; continue } s[++n] = $i }
+    o = ""; for (i = 1; i <= n; i++) o = o "/" s[i]; print (o == "" ? "/" : o) }')
+  orca_phys "$_p"
+}
+
+# orca_top <absolute physical path>: top level of the checkout containing the path, or empty.
+# Uses git; when git cannot read the checkout (for example a worktree whose .git points
+# nowhere), falls back to the nearest ancestor that has a .git entry.
+orca_top() {
+  _d=$1
+  while [ ! -d "$_d" ]; do _d=${_d%/*}; [ -z "$_d" ] && _d=/; done
+  _t=$(git -C "$_d" rev-parse --show-toplevel 2>/dev/null)
+  if [ -n "$_t" ]; then orca_phys "$_t"; return; fi
+  while :; do
+    [ -e "$_d/.git" ] && { printf '%s\n' "$_d"; return; }
+    [ "$_d" = / ] && return
+    _d=${_d%/*}; [ -z "$_d" ] && _d=/
+  done
+}
+
+# orca_scoped <top>: true when the checkout opted into the Orca worktree rules.
+orca_scoped() {
+  for _f in "$1/.claude/CLAUDE.md" "$1/AGENTS.md"; do
+    [ -f "$_f" ] && grep -qF "$ORCA_MARKER" "$_f" 2>/dev/null && return 0
+  done
+  return 1
+}
+
+# orca_git_kind <top>: master (main checkout) or child (linked worktree) from git; empty on failure.
+orca_git_kind() {
+  _g=$(git -C "$1" rev-parse --absolute-git-dir 2>/dev/null) || return 0
+  _c=$(cd "$1" 2>/dev/null && _c=$(git rev-parse --git-common-dir 2>/dev/null) && CDPATH= cd -P -- "$_c" 2>/dev/null && pwd -P) || return 0
+  [ -n "$_g" ] && [ -n "$_c" ] || return 0
+  if [ "$(orca_phys "$_g")" = "$_c" ]; then echo master; else echo child; fi
+}
+
+# orca_orca_kind <top>: master or child from Orca; empty when Orca fails, times out, answers
+# ok:false, or answers for a different checkout.
+orca_orca_kind() {
+  _o=$(cd "$1" 2>/dev/null && orca_cli worktree current --json 2>/dev/null)
+  _o=$(printf '%s' "$_o" | jq -r 'select(.ok == true) | .result.worktree
+    | select(type == "object" and (.isMainWorktree | type) == "boolean" and (.path | type) == "string")
+    | (if .isMainWorktree then "master" else "child" end) + " " + .path' 2>/dev/null)
+  [ -n "$_o" ] || return 0
+  [ "$(orca_phys "${_o#* }")" = "$1" ] && printf '%s\n' "${_o%% *}"
+  return 0
+}
+
+# orca_role <dir>: none (out of scope), master, child, or unknown.
+orca_role() {
+  [ -z "$1" ] && { echo none; return; }
+  _top=$(orca_top "$(orca_abspath "$1" /)")
+  [ -n "$_top" ] && orca_scoped "$_top" || { echo none; return; }
+  _ok=$(orca_orca_kind "$_top")
+  _gk=$(orca_git_kind "$_top")
+  if [ -n "$_ok" ] && [ -n "$_gk" ]; then
+    if [ "$_ok" = "$_gk" ]; then echo "$_ok"; else echo unknown; fi
+  elif [ -n "$_ok$_gk" ]; then echo "$_ok$_gk"
+  else echo unknown
+  fi
+}
+
+# orca_worktrees <dir>: physical paths of every worktree of the repository at <dir>, main first.
+orca_worktrees() {
+  git -C "$1" worktree list --porcelain 2>/dev/null | while IFS= read -r _l; do
+    case "$_l" in "worktree "*) orca_phys "${_l#worktree }" ;; esac
+  done
+}
+
+# Per-repository settings: an optional .orca-dev-ops.json at the top level of the main checkout
+# (see docs/config.md). It is always read from the main checkout, never from a linked worktree,
+# so a child cannot loosen its own limits by editing its copy. A missing file, or a checkout
+# whose main checkout git cannot name, means the built-in defaults (the behavior without
+# settings: workflow mode worktree, the limits, launch mode ask). An invalid file (bad JSON, an
+# unknown key, a wrong type or value, launch mode
+# semi-auto or auto without agent, model, and effort, launch.escalate without mode
+# semi-auto or auto, or launch.top without launch.escalate) is ignored as a whole: the defaults apply and
+# ORCA_CONFIG_ERROR says why.
+# workflow.mode "direct" makes the coordinator implement in the main checkout and commit on the
+# base ref (the role guard lifts its edit limits there and blocks orca worktree create);
+# launch and limits stay valid next to it, for switching back.
+# $schema (a non-empty string) only points editors at schemas/orca-dev-ops.schema.json; it is
+# accepted and left out of the effective settings.
+# heavy (opt-in, no defaults here): scripts/orca-heavy.sh limits how many heavy commands (test
+# suites, builds) the worktrees of this repository run at once; heavy.commands also makes the
+# role guard deny those commands in a child unless wrapped. The same keys except commands may be
+# overridden per machine (ORCA_HEAVY_LOCAL_CHECK, see scripts/orca-heavy.sh).
+# Deprecated: the monitor section (wakeOnStatus, timeoutMs) configured scripts/orca-wait.sh,
+# which 1.12.0 removed (Orca wakes the coordinator itself). It is still accepted and checked as
+# before, so existing files stay valid, but it is left out of the effective settings and a valid
+# file that has it gets a deprecation notice in ORCA_CONFIG_ERROR. A later major version
+# removes it.
+ORCA_CONFIG_FILE=.orca-dev-ops.json
+ORCA_CONFIG_DEFAULTS='{"workflow":{"mode":"worktree"},"launch":{"mode":"ask"},"limits":{"maxWorktrees":3,"smallChangeFiles":2,"smallChangeLines":20}}'
+# The opt-in keys (those without a default), for orca-init.sh: a jq filter over the effective
+# settings (the defaults merged with a valid file) that emits one {path} per key, with a
+# suggested "value" only when adding that value to the file keeps it valid. The hooks do not use it.
+ORCA_CONFIG_OPT_IN='{path: ["launch", "agent"]}, {path: ["launch", "model"]}, {path: ["launch", "effort"]},
+  ({path: ["launch", "escalate"]} + if (.launch.mode == "semi-auto" or .launch.mode == "auto") and .launch.agent == "claude"
+    then {value: {model: "claude-opus-5-5", effort: "high"}} else {} end),
+  ({path: ["launch", "top"]} + if (.launch.mode == "semi-auto" or .launch.mode == "auto") and .launch.agent == "claude"
+      and (.launch.escalate | type) == "object"
+    then {value: {model: "claude-fable-5-2", effort: "high"}} else {} end)'
+# The checks of the heavy keys, as a jq expression over one object, emitting "<key> must be ..."
+# lines: shared by the repository file (heavy.<key>) and the per-machine file.
+ORCA_HEAVY_CHECK='need("concurrency"; . == "auto" or (int and . >= 1); "\"auto\" or an integer >= 1"),
+      need("coresPerSlot"; int and . >= 1; "an integer >= 1"),
+      need("memoryGBPerSlot"; int and . >= 1; "an integer >= 1"),
+      need("maxLoad"; type == "number" and . > 0; "a number > 0"),
+      need("minFreeMemory"; int and . >= 0 and . <= 100; "an integer from 0 to 100"),
+      need("maxWaitSeconds"; int and . >= 0; "an integer >= 0"),
+      need("priority"; . == "normal" or . == "low" or . == "background"; "\"normal\", \"low\", or \"background\"")'
+ORCA_HEAVY_LOCAL_KEYS='"concurrency", "coresPerSlot", "memoryGBPerSlot", "maxLoad", "minFreeMemory", "maxWaitSeconds", "priority"'
+ORCA_CONFIG_DEFS='def int: type == "number" and . == floor;
+  def word: type == "string" and test("^\\S+$");
+  def need($k; ok; $what): if has($k) and (.[$k] | ok | not) then "\($k) must be \($what)" else empty end;'
+# Reads the slurped file (an array of its JSON values) and prints every problem, "; "-joined;
+# empty when the file is valid.
+ORCA_CONFIG_CHECK="$ORCA_CONFIG_DEFS"'
+  def section($name; $allowed):
+    if has($name) | not then empty
+    elif (.[$name] | type) != "object" then "\($name) must be an object"
+    else (.[$name] | keys - $allowed)[] | "unknown key \($name).\(.)" end;
+  def tier($k): select(has($k)) | .[$k] | if type != "object" then "\($k) must be an object"
+    else ((keys - ["model", "effort"])[] | "\($k).\(.) is not allowed"),
+      (["model", "effort"][] as $f | select((has($f) | not) or (.[$f] | word | not))
+        | "\($k).\($f) must be a non-empty string without spaces") end;
+  if length != 1 then "the file must hold exactly one JSON object"
+  else .[0] | if type != "object" then "the top level must be a JSON object" else [
+    ((keys - ["$schema", "workflow", "launch", "limits", "heavy", "monitor"])[] | "unknown key \(.)"),
+    (select(has("$schema") and (.["$schema"] | type != "string" or length == 0)) | "$schema must be a non-empty string"),
+    section("workflow"; ["mode"]),
+    section("launch"; ["mode", "agent", "model", "effort", "escalate", "top"]),
+    section("limits"; ["maxWorktrees", "smallChangeFiles", "smallChangeLines"]),
+    section("heavy"; ['"$ORCA_HEAVY_LOCAL_KEYS"', "commands"]),
+    section("monitor"; ["wakeOnStatus", "timeoutMs"]),
+    (.workflow | objects | need("mode"; . == "worktree" or . == "direct"; "\"worktree\" or \"direct\"") | "workflow.\(.)"),
+    (.launch | objects | (
+      need("mode"; . == "ask" or . == "semi-auto" or . == "auto"; "\"ask\", \"semi-auto\", or \"auto\""),
+      need("agent"; . == "claude" or . == "codex"; "\"claude\" or \"codex\""),
+      need("model"; word; "a non-empty string without spaces"),
+      need("effort"; word; "a non-empty string without spaces"),
+      tier("escalate"),
+      (select(has("escalate") and .mode != "semi-auto" and .mode != "auto")
+        | "escalate is only valid with mode \"semi-auto\" or \"auto\""),
+      tier("top"),
+      (select(has("top") and (has("escalate") | not)) | "top is only valid together with escalate"),
+      (select((.mode == "semi-auto" or .mode == "auto") and ([.agent, .model, .effort] | all(word) | not))
+        | "mode \"\(.mode)\" needs agent, model, and effort")) | "launch.\(.)"),
+    (.limits | objects | (
+      need("maxWorktrees"; int and . >= 1; "an integer >= 1"),
+      need("smallChangeFiles"; int and . >= 0; "an integer >= 0"),
+      need("smallChangeLines"; int and . >= 0; "an integer >= 0")) | "limits.\(.)"),
+    (.heavy | objects | ('"$ORCA_HEAVY_CHECK"',
+      need("commands"; type == "array" and all(type == "string" and test("\\S")); "an array of non-empty strings")) | "heavy.\(.)"),
+    (.monitor | objects | (
+      need("wakeOnStatus"; type == "boolean"; "true or false"),
+      need("timeoutMs"; int and . > 0; "an integer > 0")) | "monitor.\(.)")
+  ] | join("; ") end end'
+
+# orca_main_checkout <dir>: physical path of the main checkout of the repository at <dir>, or empty.
+orca_main_checkout() { orca_worktrees "$1" | sed -n 1p; }
+
+# orca_config_load <dir>: loads the settings of the repository at <dir> into
+#   ORCA_CONFIG        the effective JSON (defaults merged with the file), compact
+#   ORCA_CONFIG_STATE  missing, valid, or invalid
+#   ORCA_CONFIG_PATH   the file it looked for (empty when the main checkout is unknown)
+#   ORCA_CONFIG_ERROR  the settings warning: why an invalid file was ignored, or, for a valid
+#                      file, the deprecation notice for monitor (empty otherwise; the state
+#                      stays valid)
+# Always returns 0; safe under set -e.
+orca_config_load() {
+  ORCA_CONFIG=$ORCA_CONFIG_DEFAULTS ORCA_CONFIG_STATE=missing ORCA_CONFIG_PATH= ORCA_CONFIG_ERROR=
+  _m=$(orca_main_checkout "$1") || _m=
+  if [ -z "$_m" ]; then return 0; fi
+  ORCA_CONFIG_PATH=$_m/$ORCA_CONFIG_FILE
+  if [ ! -e "$ORCA_CONFIG_PATH" ] && [ ! -L "$ORCA_CONFIG_PATH" ]; then return 0; fi
+  if [ ! -f "$ORCA_CONFIG_PATH" ] || [ ! -r "$ORCA_CONFIG_PATH" ]; then
+    _e='it is not a readable regular file'
+  else
+    _e=$(jq -rs "$ORCA_CONFIG_CHECK" "$ORCA_CONFIG_PATH" 2>/dev/null) || _e='it is not valid JSON'
+  fi
+  if [ -z "$_e" ]; then
+    _c=$(jq -cs --argjson d "$ORCA_CONFIG_DEFAULTS" '$d * .[0] | del(.monitor, .["$schema"])' "$ORCA_CONFIG_PATH" 2>/dev/null) || _c=
+    if [ -n "$_c" ]; then
+      ORCA_CONFIG=$_c ORCA_CONFIG_STATE=valid
+      if jq -es '.[0] | has("monitor")' "$ORCA_CONFIG_PATH" >/dev/null 2>&1; then
+        ORCA_CONFIG_ERROR="monitor is ignored since 1.12.0; remove it from $ORCA_CONFIG_PATH."
+      fi
+      return 0
+    fi
+    _e='it could not be read'
+  fi
+  ORCA_CONFIG_STATE=invalid
+  ORCA_CONFIG_ERROR="Ignored $ORCA_CONFIG_PATH ($_e); the built-in defaults apply, including launch mode ask."
+  return 0
+}
+
+# orca_config <jq path>: one value of the loaded settings (after orca_config_load), raw; empty
+# when unset.
+orca_config() { printf '%s' "$ORCA_CONFIG" | jq -r "$1 | select(. != null)" 2>/dev/null; }
