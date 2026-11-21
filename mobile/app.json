@@ -1,12 +1,12 @@
 {
   "expo": {
-    "name": "Orca",
-    "slug": "orca-mobile",
+    "name": "Orca Pod",
+    "slug": "orca-pod",
     "version": "0.0.68",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
-    "scheme": "orca",
+    "scheme": "orcapod",
     "newArchEnabled": true,
     "locales": {
       "en": "./locales/en.json",
@@ -28,7 +28,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.stably.orca.mobile",
+      "bundleIdentifier": "com.spade3.orcapod",
       "buildNumber": "1",
       "infoPlist": {
         "CFBundleAllowMixedLocalizations": true,
