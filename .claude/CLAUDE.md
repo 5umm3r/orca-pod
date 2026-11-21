@@ -59,3 +59,24 @@ coordinator session follows the `orca-dev-ops` skill instead.
   reporting done. Do not edit a file another active task worktree has
   declared in its scope.
 <!-- orca-worktree-rules:end -->
+
+## Orca Pod fork rules
+
+This repository is a personal fork of stablyai/orca (base branch `orcapod`, cut from tag `v1.4.268`).
+The work adds an `island` home tab to the mobile app. The plan lives at
+`/Users/mbp16-max/app-develop/orcabots-ios/docs/superpowers/plans/2026-11-22-orca-mobile-island-tab.md`.
+
+- Also read and follow `AGENTS.md` at the repository root; it holds the upstream repository's own rules.
+- Keep the diff against upstream small: put new code under `mobile/src/island/` and
+  `mobile/scripts/build-island-webview-engine.mjs`. Do not change `mobile/package.json`, any lockfile,
+  or `mobile/src/i18n/locales/*.json`.
+- Files that two task worktrees must never edit at the same time:
+  `mobile/src/home/MobileHomeScreen.tsx`, `mobile/src/home/tabs/home-tabs.ts`,
+  `mobile/src/home/tabs/MobileHomeTabBar.tsx`, `mobile/app.json`, `mobile/src/island/island-types.ts`.
+- Heavy commands (run only through the `orca-heavy.sh run --` wrapper the Dispatch names):
+  `pnpm install`, `pnpm typecheck`, `pnpm test`, `pnpm native ensure ios`.
+- Verification before reporting done (from `mobile/`):
+  1. `pnpm vitest run src/island`
+  2. `pnpm lint`
+  3. `pnpm typecheck` (heavy)
+- iOS only. Android-specific work is out of scope.
