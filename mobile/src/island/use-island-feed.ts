@@ -45,7 +45,8 @@ export function useIslandFeed(
   // The effect restarts only when the set of places or bots changes, not on every row update.
   const botsKey = onlineBotRows(rows)
     .map((row) => `${placeOf(row)}\n${row.key}\n${row.bot.id}`)
-    .toSorted()
+    // Hermes on this React Native has no Array.prototype.toSorted; map() already made a fresh array.
+    .sort()
     .join('\u0000')
 
   useEffect(() => {

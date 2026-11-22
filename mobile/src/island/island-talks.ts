@@ -36,5 +36,6 @@ export function islandTalksFrom(
       }
     })
   }
-  return talks.toSorted((a, b) => a.sequence - b.sequence).map((entry) => entry.talk)
+  // Hermes on this React Native has no Array.prototype.toSorted; talks is local, so sort in place.
+  return talks.sort((a, b) => a.sequence - b.sequence).map((entry) => entry.talk)
 }
