@@ -29,6 +29,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.spade3.orcapod",
+      "appleTeamId": "ZXL9PZ4629",
       "buildNumber": "1",
       "infoPlist": {
         "CFBundleAllowMixedLocalizations": true,
