@@ -4475,5 +4475,16 @@
       "unreachableSingle": "{{name}}に接続できませんでした。そのコンピュータでOrcaが起動していることを確認し、もう一度お試しください。",
       "workspaceDeleted": "このチャットのワークスペースは{{name}}で削除されました。"
     }
+  },
+  "island": {
+    "tab": "島",
+    "state": {
+      "working": "作業中",
+      "permission": "承認待ち",
+      "available": "待機",
+      "paused": "停止中"
+    },
+    "more": "ほか {{count}} 体",
+    "loading": "島を準備しています"
   }
 }

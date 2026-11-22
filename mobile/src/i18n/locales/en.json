@@ -6182,5 +6182,16 @@
       "needsWindow": "Couldn’t update. Open Orca on {{desktop}}.",
       "failed": "Couldn’t update the agent list."
     }
+  },
+  "island": {
+    "tab": "Island",
+    "state": {
+      "working": "Working",
+      "permission": "Needs approval",
+      "available": "Available",
+      "paused": "Paused"
+    },
+    "more": "+{{count}} more",
+    "loading": "Preparing the island"
   }
 }

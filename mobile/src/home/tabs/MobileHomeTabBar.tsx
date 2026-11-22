@@ -3,6 +3,7 @@ import {
   CalendarClock,
   Gauge,
   LayoutList,
+  Mountain,
   SquareTerminal,
   type LucideIcon
 } from 'lucide-react-native'
@@ -22,6 +23,7 @@ import { useMobileColorScheme } from '../../theme/use-mobile-color-scheme'
 import { HOME_EASE_OUT, type HomeTabId } from './home-tabs'
 
 const TAB_ICONS: Record<HomeTabId, LucideIcon> = {
+  island: Mountain,
   feed: LayoutList,
   bots: Bot,
   agents: SquareTerminal,
@@ -44,6 +46,7 @@ export function MobileHomeTabBar(props: {
   const t = useMobileTranslation()
   useMobileColorScheme()
   const labels: Record<HomeTabId, string> = {
+    island: t('island.tab', 'Island'),
     feed: t('home.tabs.feed', 'Feed'),
     bots: t('home.tabs.bots', 'Bots'),
     agents: t('home.tabs.agents', 'Agents'),

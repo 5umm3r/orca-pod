@@ -29,6 +29,7 @@ import type { HostCatalogEntry, HostProfile } from '../host-catalog/host-profile
 import { useOpenMobileHostEdit } from '../host-screen/identity/use-open-mobile-host-edit'
 import { mobileConnectionPathLabel } from '../transport/connection/mobile-connection-path-label'
 import { newWorkspaceOverlayHref } from '../new-workspace/new-workspace-overlay-route'
+import { MobileHomeIslandTab } from '../island/MobileHomeIslandTab'
 import { useMobileHomeData } from './use-mobile-home-data'
 import { useHomeSparePage } from './use-home-spare-page'
 import { HOME_TABS, type HomeTabId } from './tabs/home-tabs'
@@ -62,9 +63,9 @@ export function MobileHomeScreen() {
   const forceReconnectHost = useForceReconnect()
   const [actionTarget, setActionTarget] = useState<HostProfile | null>(null)
   const [confirmRemove, setConfirmRemove] = useState<{ id: string; name: string } | null>(null)
-  const [tab, setTab] = useState<HomeTabId>('feed')
+  const [tab, setTab] = useState<HomeTabId>('island')
   // A tab mounts on first visit and then stays mounted, keeping its scroll and data.
-  const [visitedTabs, setVisitedTabs] = useState<ReadonlySet<HomeTabId>>(() => new Set(['feed']))
+  const [visitedTabs, setVisitedTabs] = useState<ReadonlySet<HomeTabId>>(() => new Set(['island']))
   const [automationsHostId, setAutomationsHostId] = useState<string | null>(null)
   const [newBotOpen, setNewBotOpen] = useState(false)
   const openBotHome = useOpenBotHome()
@@ -80,14 +81,14 @@ export function MobileHomeScreen() {
     setVisitedTabs((visited) => (visited.has(next) ? visited : new Set([...visited, next])))
   }, [])
 
-  // Android Back from another tab returns to Feed before it leaves the app.
+  // Android Back from another tab returns to Island before it leaves the app.
   useFocusEffect(
     useCallback(() => {
-      if (tab === 'feed') {
+      if (tab === 'island') {
         return undefined
       }
       const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-        selectTab('feed')
+        selectTab('island')
         return true
       })
       return () => subscription.remove()
@@ -215,7 +216,21 @@ export function MobileHomeScreen() {
           {HOME_TABS.map((id) =>
             visitedTabs.has(id) ? (
               <View key={id} style={id === tab ? styles.fill : styles.hidden}>
-                {id === 'feed' ? (
+                {id === 'island' ? (
+                  <MobileHomeIslandTab
+                    data={data}
+                    active={tab === 'island'}
+                    bottomInset={contentBottom}
+                    onOpenBot={openBot}
+                    fallback={
+                      <MobileHomeBotsTab
+                        data={data}
+                        bottomInset={contentBottom}
+                        onOpenBot={openBot}
+                      />
+                    }
+                  />
+                ) : id === 'feed' ? (
                   <MobileHomeFeedTab
                     data={data}
                     bottomInset={contentBottom}
