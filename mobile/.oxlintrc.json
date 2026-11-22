@@ -22,6 +22,27 @@
   },
   "overrides": [
     {
+      "files": ["src/island/**"],
+      "excludeFiles": [
+        "src/island/scene/**",
+        "src/island/**/*.generated.ts",
+        "src/island/**/*.test.ts",
+        "src/island/**/*.test.tsx"
+      ],
+      "rules": {
+        "eslint/no-restricted-properties": [
+          "error",
+          {
+            "property": "toSorted",
+            "message": "Hermes lacks Array.prototype.toSorted; use [...a].sort()."
+          },
+          { "property": "toReversed", "message": "Hermes policy: use [...a].reverse()." },
+          { "property": "toSpliced", "message": "Hermes policy: copy then splice()." },
+          { "property": "with", "message": "Hermes policy: copy then assign by index." }
+        ]
+      }
+    },
+    {
       "files": ["src/terminal/webview/TerminalWebView.tsx"],
       "rules": {
         "max-lines": [
